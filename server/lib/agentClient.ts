@@ -43,9 +43,35 @@ export interface AgentEvent {
 /* ────────────────────────────────────────────────────────── */
 export const API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
+
 export async function createInteraction(
   opts: InteractionOptions
 ): Promise<Response> {
+  if (process.env.MLX_SERVE_URL) {
+    const messages = [];
+    if (opts.inlineSources && opts.inlineSources.length > 0) {
+      let systemContent = "You have the following files available:\n";
+      for (const source of opts.inlineSources) {
+         systemContent += `\n--- ${source.target} ---\n${source.content}\n`;
+      }
+      messages.push({ role: "system", content: systemContent });
+    }
+    messages.push({ role: "user", content: opts.prompt });
+
+    const payload = {
+      messages,
+      stream: true,
+      model: "default"
+    };
+
+    return await fetch(`${process.env.MLX_SERVE_URL}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: opts.signal,
+    });
+  }
+
   const agentName = opts.agentName ?? "antigravity-preview-05-2026";
 
   const payload: Record<string, unknown> = {
@@ -162,6 +188,14 @@ export async function* streamInteraction(
 
         try {
           const data = JSON.parse(dataStr);
+          if (process.env.MLX_SERVE_URL) {
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              yield { type: "text", text: content };
+            }
+            continue;
+          }
+
           const event = parseAgentEvent(data);
           if (event) {
             console.log(`[streamInteraction] Successfully parsed event: type="${event.type}"`);
